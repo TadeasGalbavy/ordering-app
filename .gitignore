@@ -1,0 +1,29 @@
+# Python cache a buildy
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Editor / IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Dočasné a log súbory
+*.log
+*.tmp
+*.bak
+
+# Výstupné Excel súbory
+*.xlsx
+
+# Virtuálne prostredia
+.env
+.venv/
+venv/
+
+# PyInstaller output
+/dist/
+/build/
+*.spec
