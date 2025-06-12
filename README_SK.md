@@ -61,6 +61,6 @@ pip install -r requirements.txt
 
 ## Autor a poznámka
 
-Aplikáciu som sám navrhol, vytvoril s pomocou AI a kompletne otestoval. Je plne funkčná a používa sa na objednávanie pre e-shop, ktorý aktuálne pôsobí v 6 krajinách.
+Aplikáciu som sám navrhol, backend vytvoril s pomocou AI a kompletne otestoval. Je plne funkčná a používa sa na objednávanie pre e-shop, ktorý aktuálne pôsobí v 6 krajinách.
 
 Projekt slúži ako ukážka reálneho využitia automatizácie v e-commerce prostredí.
