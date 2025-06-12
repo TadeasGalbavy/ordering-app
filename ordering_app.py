@@ -1,3 +1,10 @@
+# Modul: Objednavanie_FINAL
+# Automatizované spracovanie objednávok z Excelu pomocou GUI.
+# Obsahuje dva režimy: "vykrytie objednávok" a "objednávanie na sklad".
+# Posledná verzia: 2025-05-30
+
+# Import knižnic pre prácu s dátami, Excelom, GUI a systémom
+
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Border, Side, numbers
@@ -10,57 +17,109 @@ import shutil
 import tempfile
 import sys
 from decimal import Decimal, getcontext
+import math
 
+# Nastavenie presnosti pre desatinné výpočty (Decimal)
 getcontext().prec = 6
 
+# Funkcia na extrakciu ikony pre GUI (podporuje aj .exe build cez PyInstaller)
 def extract_icon_temp():
     if hasattr(sys, "_MEIPASS"):
+        
         zdroj = os.path.join(sys._MEIPASS, "logo.ico")
-        ciel = os.path.join(tempfile.gettempdir(), "temp_logo.ico")
-        shutil.copyfile(zdroj, ciel)
-        return ciel
     else:
-        return "logo.ico"
+        
+        zdroj = os.path.join(os.path.dirname(__file__), "logo.ico")
 
+    ciel = os.path.join(tempfile.gettempdir(), "temp_logo.ico")
+    shutil.copyfile(zdroj, ciel)
+    return ciel
+
+# Vypočíta minimálne počet ks pre dosiahnutie cieľového koeficientu s toleranciou
 def najdi_min_objednavku(skladom, objednavky, priemer, ciel_koef):
-    skladom = Decimal(skladom)
-    objednavky = Decimal(objednavky)
-    priemer = Decimal(priemer) if priemer != 0 else Decimal("0.1")
+    skladom = Decimal(str(skladom))
+    objednavky = Decimal(str(objednavky))
+    priemer = Decimal(str(priemer)) if priemer != 0 else Decimal("0.1")
     ciel_koef = Decimal(str(ciel_koef))
+    tolerancia = Decimal("0.05")  # 5 % tolerancia
 
-    for objednat in range(0, 100):
+    aktualna_zasoba = skladom - objednavky
+    aktualny_koef = aktualna_zasoba / priemer
+
+    # Tolerancia vo výpočte
+    if aktualny_koef >= ciel_koef - tolerancia:
+        return 0
+
+    for objednat in range(0, 10000):
         aktualna_zasoba = skladom - objednavky + objednat
         aktualny_koef = aktualna_zasoba / priemer
-        if round(aktualny_koef, 2) >= round(ciel_koef, 2):
+        if aktualny_koef >= ciel_koef - tolerancia:
             return objednat
-    return 100
 
+    return 10000
+
+# Hlavný algoritmus na výpočet objednávky podľa typu produktu a koeficientu
 def vypocitaj_objednavku(row, koef_bestseller, koef_bezny):
     skladom = row["Reálne skladom"]
     objednavky = row["Počet nevybavených objednávok"] + row["Počet neštandardných objednávok"]
     priemer = row["Štvrťročný priemer"] if row["Štvrťročný priemer"] != 0 else 0.1
 
-    if row["Dopredaj"] == "Ano" or row["Na objednávku"] == "Ano":
+    if row["Dopredaj"] == "Ano":
+        # Objednaj presne na vykrytie objednávok – nič navyše
         return max(objednavky - skladom, 0)
 
-    koef = koef_bestseller if row["Bestseller"] == "Ano" else koef_bezny
+    if row["Na objednávku"] == "Ano":
+       
+        return max(objednavky - skladom, 0)
+
+    # Bestseller → objednaj s rezervou 1 ks navyše
+    # Bestseller → výpočet podľa vlastného koeficientu
+    if row["Bestseller"] == "Ano":
+        koef = koef_bestseller
+        return najdi_min_objednavku(skladom, objednavky, priemer, koef)
+
+    # Bežný výpočet cez koeficient
+    koef = koef_bezny
     return najdi_min_objednavku(skladom, objednavky, priemer, koef)
 
+# Spracovanie Excelu pre režim "vykrytie objednávok"
 def uprav_excel_old(subor_cesta, vystup_cesta, zahrnut_bestsellery, progress_callback=None):
     df = pd.read_excel(subor_cesta)
+    df["Štvrťročný priemer"] = pd.to_numeric(df["Štvrťročný priemer"], errors='coerce').fillna(0)
+    df["Štvrťročný priemer"] = df["Štvrťročný priemer"].replace(0, 0.1)
     if progress_callback: progress_callback(10)
+
+    # Pretypovanie 
+    df["Reálne skladom"] = pd.to_numeric(df["Reálne skladom"], errors='coerce').fillna(0)
+    df["Počet nevybavených objednávok"] = pd.to_numeric(df["Počet nevybavených objednávok"], errors='coerce').fillna(0)
+    df["Počet neštandardných objednávok"] = pd.to_numeric(df["Počet neštandardných objednávok"], errors='coerce').fillna(0)
     df["Štvrťročný priemer"] = df["Štvrťročný priemer"].replace([0, '0'], 0.1)
 
+    # Bezpečný výpočet
     if zahrnut_bestsellery:
         df["Calculation"] = df.apply(lambda row: max(
             0,
-            (2 - row["Reálne skladom"]) if row["Bestseller"] == "Ano" else
-            row["Počet nevybavených objednávok"] + row["Počet neštandardných objednávok"] - row["Reálne skladom"]
-        ), axis=1)
+            (
+                float(row["Počet nevybavených objednávok"]) +
+                float(row["Počet neštandardných objednávok"]) -
+                float(row["Reálne skladom"])
+            ) if row["Dopredaj"] == "Ano" else
+            (
+                float(row["Počet nevybavených objednávok"]) +
+                float(row["Počet neštandardných objednávok"]) +
+                2 - float(row["Reálne skladom"])
+            ) if row["Bestseller"] == "Ano" else
+            float(row["Počet nevybavených objednávok"]) +
+            float(row["Počet neštandardných objednávok"]) -
+            float(row["Reálne skladom"])
+            ), axis=1)
     else:
         df["Calculation"] = df["Reálne skladom"] - (
             df["Počet nevybavených objednávok"] + df["Počet neštandardných objednávok"])
         df["Calculation"] = df["Calculation"].apply(lambda x: 0 if x >= 0 else x * -1)
+        
+    df.at[0, "Režim výpočtu"] = "Vykrytie objednávok"
+    df.at[0, "Bestseller zahrnutý"] = "Áno" if zahrnut_bestsellery else "Nie"
 
     if progress_callback: progress_callback(30)
     df.to_excel(vystup_cesta, index=False)
@@ -71,17 +130,20 @@ def uprav_excel_old(subor_cesta, vystup_cesta, zahrnut_bestsellery, progress_cal
     if progress_callback: progress_callback(100)
     return "OK"
 
+# Spracovanie Excelu pre režim "objednávanie na sklad"
 def uprav_excel_new(subor_cesta, vystup_cesta, koef_bestseller, koef_bezny, progress_callback=None):
     df = pd.read_excel(subor_cesta)
     if progress_callback: progress_callback(10)
-    df["Štvrťročný priemer"] = df["Štvrťročný priemer"].replace([0, '0'], 0.1)
+    df["Štvrťročný priemer"] = pd.to_numeric(df["Štvrťročný priemer"], errors='coerce').fillna(0)
+    df["Štvrťročný priemer"] = df["Štvrťročný priemer"].replace(0, 0.1)
     df["Calculation"] = df.apply(lambda row: vypocitaj_objednavku(row, koef_bestseller, koef_bezny), axis=1)
-
+    
     if progress_callback: progress_callback(30)
     df.to_excel(vystup_cesta, index=False)
     wb = load_workbook(vystup_cesta)
     ws = wb.active
 
+    # Dynamické doplnenie vzorca pre koeficient
     skladom_col = objednavky1_col = objednavky2_col = priemer_col = calc_col = None
     for idx, cell in enumerate(ws[1], 1):
         if cell.value == "Reálne skladom": skladom_col = get_column_letter(idx)
@@ -99,10 +161,24 @@ def uprav_excel_new(subor_cesta, vystup_cesta, koef_bestseller, koef_bezny, prog
             cell.number_format = "0.0"
 
     podfarbi_a_oramuj(ws)
+
+    # Pridanie meta informácií na koniec
+    last_col = ws.max_column + 1
+    ws.insert_cols(last_col)
+    ws.insert_cols(last_col)
+    ws.insert_cols(last_col)
+
+    meta_headers = ["Režim výpočtu", "Koef. Bestseller", "Koef. bežný"]
+    meta_values = ["Objednávanie na sklad", koef_bestseller, koef_bezny]
+    for i in range(3):
+        ws.cell(row=1, column=last_col + i, value=meta_headers[i])
+        ws.cell(row=2, column=last_col + i, value=meta_values[i])
     wb.save(vystup_cesta)
     if progress_callback: progress_callback(100)
     return "OK"
 
+# Funkcia na podfarbenie a orámovanie bunkových hodnôt v Exceli
+# Používa farebnú logiku podľa typu stĺpca a pridáva orámovanie pre všetky bunky
 def podfarbi_a_oramuj(ws):
     fills = {
         "bledomodrá": PatternFill(start_color="ADD8E6", end_color="ADD8E6", fill_type="solid"),
@@ -124,7 +200,11 @@ def podfarbi_a_oramuj(ws):
         stlpec_nazov = ws[header].value
         if stlpec_nazov in farby_stlpcov:
             for cell in col:
-                if cell.value not in (None, '', 'NaN'):
+                # 💡 formátuj na 0.0 ak je číslo a ide o priemer
+                if stlpec_nazov in ["Ročný priemer", "Polročný priemer", "Štvrťročný priemer"]:
+                    if isinstance(cell.value, (int, float)):
+                        cell.number_format = "0.0"
+                if cell.value is not None and not (isinstance(cell.value, float) and math.isnan(cell.value)):
                     cell.fill = farby_stlpcov[stlpec_nazov]
 
     border = Border(left=Side(style="thin"), right=Side(style="thin"),
@@ -133,6 +213,8 @@ def podfarbi_a_oramuj(ws):
         for cell in row:
             cell.border = border
 
+# Spustenie hlavného GUI okna aplikácie
+# Umožňuje výber režimu, zadanie parametrov a spustenie spracovania Excel súboru
 def spust_gui():
     def zobraz_formular_old():
         vyber_rezim_frame.pack_forget()
@@ -145,7 +227,7 @@ def spust_gui():
         spatne_tlacidlo.pack(pady=10)
 
     def vyber_subor(zahrnut_bestsellery=None, koef_b=None, koef_n=None):
-        subor = filedialog.askopenfilename(title="Vyber Excel súbor", filetypes=[("Excel súbory", "*.xlsx")])
+        subor = filedialog.askopenfilename(title="Vyber Excel súbor weirdo", filetypes=[("Excel súbory", "*.xlsx")])
         if not subor:
             return
 
@@ -174,10 +256,18 @@ def spust_gui():
 
                 def uloz():
                     nova_cesta = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")])
-                    if nova_cesta:
+                    if not nova_cesta:
+                        return
+
+                    try:
+                        # Skúsime otvoriť cieľový súbor na zápis (ak je zamknutý, padne)
+                        with open(nova_cesta, "a"):
+                            pass
                         shutil.copyfile(vystup, nova_cesta)
                         messagebox.showinfo("Uložené", f"Súbor bol uložený ako:\n{nova_cesta}")
-                    root.destroy()
+                        root.destroy()
+                    except PermissionError:
+                        messagebox.showerror("Chyba", "Súbor je pravdepodobne otvorený.\nZavri ho a skús znova (lol).")
 
                 Button(root, text="Uložiť ako...", command=uloz,
                     bg="#6E7F46", fg="white", font=("Segoe UI", 10, "bold"), padx=10).pack(pady=5)
@@ -195,7 +285,21 @@ def spust_gui():
         threading.Thread(target=spracuj).start()
 
     root = Tk()
+    
+     # Výpočet rozmerov a zarovnanie GUI do stredu obrazovky
+    okno_sirka = 460
+    okno_vyska = 300
 
+    # Výpočet stredu obrazovky
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+
+    x = int((screen_width / 2) - (okno_sirka / 2))
+    y = int((screen_height / 2) - (okno_vyska / 2))
+
+    root.geometry(f"{okno_sirka}x{okno_vyska}+{x}+{y}")
+
+    # Nastavenie štýlu GUI (farby, progress bar)
     style = ttk.Style()
     style.theme_use("default")
     style.configure("green.Horizontal.TProgressbar", troughcolor="#C5D1A3", background="#6E7F46", thickness=20)
@@ -203,16 +307,17 @@ def spust_gui():
     root.title("Výber režimu objednávania")
     root.iconbitmap(extract_icon_temp())
     root.configure(bg="#C5D1A3")
-    root.geometry("460x300")
 
+    # Úvodné okno s výberom režimu
     vyber_rezim_frame = Frame(root, bg="#C5D1A3")
     vyber_rezim_frame.pack(pady=30)
-    Label(vyber_rezim_frame, text="Zvoľ typ objednávania:", bg="#C5D1A3", font=("Segoe UI", 11, "bold")).pack(pady=10)
+    Label(vyber_rezim_frame, text="🦖 Zvoľ typ objednávania:", bg="#C5D1A3", font=("Segoe UI", 11, "bold")).pack(pady=10)
     Button(vyber_rezim_frame, text="✅ Vykrytie objednávok", command=zobraz_formular_old,
            bg="#6E7F46", fg="white", font=("Segoe UI", 10, "bold"), padx=8, pady=4).pack(pady=5)
     Button(vyber_rezim_frame, text="📦 Objednávanie na sklad", command=zobraz_formular_new,
            bg="#6E7F46", fg="white", font=("Segoe UI", 10, "bold"), padx=8, pady=4).pack(pady=5)
     
+    # Tlačidlo späť na výber režimu
     spatne_tlacidlo = Button(root, text="← Späť na výber režimu",
     command=lambda: (
         formular_old.pack_forget(),
@@ -236,7 +341,7 @@ def spust_gui():
     formular_new = Frame(root, bg="#C5D1A3")
     koef_b_var = StringVar()
     koef_n_var = StringVar()
-    Label(formular_new, text="Koeficient pre Bestseller (Áno):", bg="#C5D1A3").pack()
+    Label(formular_new, text="Koeficient pre Bestseller:", bg="#C5D1A3").pack()
     Entry(formular_new, textvariable=koef_b_var).pack()
     Label(formular_new, text="Koeficient pre ostatné produkty:", bg="#C5D1A3").pack()
     Entry(formular_new, textvariable=koef_n_var).pack()
@@ -246,13 +351,13 @@ def spust_gui():
                koef_n=float(koef_n_var.get().replace(",", "."))
            ),
            bg="#6E7F46", fg="white", font=("Segoe UI", 10, "bold"), padx=8, pady=4).pack(pady=5)
-
+    
+    # Progress bar a status label
     progress_bar = ttk.Progressbar(root, orient="horizontal", length=360, mode="determinate",
                                    style="green.Horizontal.TProgressbar")
     progress_label = Label(root, text="", bg="#C5D1A3")
-    ttk.Style().configure("green.Horizontal.TProgressbar", troughcolor="#C5D1A3", background="#6E7F46", thickness=20)
-
     root.mainloop()
-
+    
+# Spustenie aplikácie pri spustení súboru
 if __name__ == "__main__":
     spust_gui()
