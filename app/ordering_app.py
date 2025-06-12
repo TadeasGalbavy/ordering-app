@@ -1,7 +1,10 @@
-# Modul: Objednavanie_FINAL
-# Automatizované spracovanie objednávok z Excelu pomocou GUI.
-# Obsahuje dva režimy: "vykrytie objednávok" a "objednávanie na sklad".
-# Posledná verzia: 2025-05-30
+# Objednávací nástroj pre Excel (GUI)
+# Autor: Tadeáš Galbavý
+# Licencia: Creative Commons BY-NC 4.0 (https://creativecommons.org/licenses/by-nc/4.0/)
+#
+# Tento skript je súčasťou aplikácie na automatizáciu objednávania produktov z Excelu.
+# Môžete ho používať a upravovať pre nekomerčné účely s uvedením autora.
+# Komerčné použitie je bez súhlasu autora zakázané.
 
 # Import knižnic pre prácu s dátami, Excelom, GUI a systémom
 
